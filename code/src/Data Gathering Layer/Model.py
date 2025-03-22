@@ -1,88 +1,64 @@
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime
+import logging
 from transformers import pipeline
+
+# Configure Logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Load NLP Models
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+sentiment_analyzer = pipeline("text-classification", model="ProsusAI/finbert")
 
 # SEC API Headers
 HEADERS = {"User-Agent": "my-sec-bot/1.0 (contact: myemail@example.com)"}
 
-# Function to Get CIK Number from Company Name
-def get_cik_number(company_name):
-    sec_url = "https://www.sec.gov/files/company_tickers.json"
-    response = requests.get(sec_url, headers=HEADERS)
-    if response.status_code == 200:
-        cik_data = response.json()
-        for entry in cik_data.values():
-            if company_name.lower() in entry["title"].lower():
-                return str(entry["cik_str"]).zfill(10)
-    return None
-
-# Function to Get SEC Filings Using CIK Number
-def get_sec_filings(cik_number):
-    if not cik_number:
-        return "Invalid CIK number"
-    sec_url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik_number}&output=atom"
-    response = requests.get(sec_url, headers=HEADERS)
-    if response.status_code == 200:
-        root = ET.fromstring(response.content)
-        ns = {"atom": "http://www.w3.org/2005/Atom"}
-        entries = root.findall(".//atom:entry", ns)
-        filings = [f"- {entry.find('atom:title', ns).text}: {entry.find('atom:link', ns).attrib.get('href', 'No Link')}" for entry in entries[:5]]
-        return "\n".join(filings) if filings else "No filings found."
-    return f"Error: {response.status_code}, {response.text}"
-
-# Function to Fetch Full Financial Statements from SEC API
-def get_financial_statements(cik):
-    url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
-    response = requests.get(url, headers=HEADERS)
-    if response.status_code == 200:
-        data = response.json()
-        statements = {}
-        for concept, details in data.get("facts", {}).get("us-gaap", {}).items():
-            if "units" in details and "USD" in details["units"]:
-                statements[concept] = details["units"]["USD"]
-        return statements
-    return {}
-
 # Function to Fetch Financial News
 def get_financial_news(company_name):
     API_KEY = "9047082950c04406ad8378594370e334"  # Replace with your API key
-    cik = get_cik_number(company_name)
-    executives = get_executives_from_sec(cik) if cik else []
-    keywords = f'"{company_name}" OR "{company_name} stock"'
-    if executives:
-        keywords += " OR " + " OR ".join([f'"{exec_name}"' for exec_name in executives])
-    url = f"https://newsapi.org/v2/everything?q={keywords}&language=en&sortBy=publishedAt&apiKey={API_KEY}"
+    url = f"https://newsapi.org/v2/everything?q={company_name}&language=en&sortBy=publishedAt&apiKey={API_KEY}"
     response = requests.get(url)
     data = response.json()
     if "articles" in data:
-        return [f"- {article['title']}: {article['url']}" for article in data["articles"][:15]]
+        news_list = [{"title": article["title"], "description": article["description"]} for article in data["articles"][:10]]
+        logging.info(f"Fetched {len(news_list)} news articles for {company_name}")
+        return news_list
+    logging.warning(f"No financial news found for {company_name}")
     return []
 
-# Function to Fetch Executives from SEC
-def get_executives_from_sec(cik):
-    sec_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-    response = requests.get(sec_url, headers=HEADERS)
-    if response.status_code == 200:
-        data = response.json()
-        return [officer["name"] for officer in data.get("officers", [])[:5]]
-    return []
+# Function to Perform Sentiment Analysis on Financial News
+def analyze_news_sentiment(news_list):
+    sentiment_scores = {"positive": 0, "neutral": 0, "negative": 0}
+    analyzed_news = []
+
+    for article in news_list:
+        title = article["title"]
+        description = article.get("description", "")
+        text = f"{title}. {description}" if description else title
+
+        sentiment = sentiment_analyzer(text[:512])[0]  # Truncate to fit model limit
+        sentiment_label = sentiment["label"].lower()
+        sentiment_scores[sentiment_label] += 1
+        analyzed_news.append(f"- {title} ({sentiment_label.capitalize()})")
+
+    # Determine overall sentiment
+    overall_sentiment = max(sentiment_scores, key=sentiment_scores.get)
+    return analyzed_news, overall_sentiment
 
 # Function to Compile Risk Data
 def compile_risk_data(company_name):
     cik = get_cik_number(company_name)
     if not cik:
         return "❌ CIK not found."
-    
-    report = f"🔹 Entity: {company_name}\n"
-    report += f"🔹 CIK: {cik}\n\n"
-    
+
+    report = f"🔹 Entity: {company_name}\n🔹 CIK: {cik}\n\n"
+
     # Fetch latest SEC filings
     report += "📄 Latest SEC Filings:\n" + get_sec_filings(cik) + "\n\n"
     
     # Fetch financial statements
     financial_statements = get_financial_statements(cik)
-    report += "Full Financial Statements (Past 4 Years):\n"
+    report += "📊 Full Financial Statements (Past 4 Years):\n"
     if financial_statements:
         for concept, values in financial_statements.items():
             report += f"  🔹 {concept}:\n"
@@ -90,18 +66,32 @@ def compile_risk_data(company_name):
                 if "end" in record:
                     year = record["end"][:4]
                     value = record["val"]
-                    report += f"{year}: ${value:,.2f}\n"
+                    report += f"    {year}: ${value:,.2f}\n"
     else:
         report += "  ❌ No financial data found.\n"
-    
-    # Fetch financial news
-    news_articles = get_financial_news(company_name)
-    report += "\nLatest Financial News:\n"
-    report += "\n".join(news_articles) if news_articles else "  ❌ No relevant news found."
-    
+
+    # Fetch and analyze financial news
+    news_list = get_financial_news(company_name)
+    if news_list:
+        analyzed_news, overall_sentiment = analyze_news_sentiment(news_list)
+        report += "\n📰 Financial News Sentiment: " + overall_sentiment.capitalize() + "\n"
+        report += "\n".join(analyzed_news) + "\n\n"
+    else:
+        report += "\n📰 Financial News Sentiment: No recent news available.\n"
+
+    # Risk Analysis using AI
+    report += "\n⚠️ **Risk Assessment Summary:**\n"
+    try:
+        risk_input = report[:1024]  # Truncate input to fit model limits
+        risk_summary = summarizer(risk_input, max_length=150, min_length=50, do_sample=False)
+        report += risk_summary[0]["summary_text"]
+    except Exception as e:
+        logging.error(f"Failed to generate risk analysis: {str(e)}")
+        report += "❌ Could not generate risk analysis."
+
     return report
 
 # Example Usage
-company_name = "Tesla"
+company_name = "Wells Fargo"
 final_report = compile_risk_data(company_name)
 print("\n📝 Final Risk Report:\n", final_report)
