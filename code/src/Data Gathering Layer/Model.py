@@ -87,60 +87,73 @@ def get_sanctioned_embeddings():
     return df, sanctioned_embeddings
 
 # Function to Perform Sentiment Analysis on Financial News
+
 def get_financial_news(company_name):
     API_KEY = "9047082950c04406ad8378594370e334"  # Replace with your API key
-    search_query = f'"{company_name}" AND ("SEC investigation" OR "earnings report" OR "fraud" OR "merger")'
+    search_query = f'"{company_name}"'
     url = f"https://newsapi.org/v2/everything?q={search_query}&language=en&sortBy=publishedAt&apiKey={API_KEY}"
 
     response = requests.get(url)
     data = response.json()
-    
-    if "articles" in data:
-        news_list = [
-            {"title": article["title"], "description": article["description"]}
-            for article in data["articles"][:15]
-        ]
-        logging.info(f"Fetched {len(news_list)} news articles for {company_name}")
-        
-        # Filter articles to make sure they actually mention the company
-        filtered_news = filter_relevant_news(news_list, company_name)
-        return filtered_news
-    
-    logging.warning(f"No relevant financial news found for {company_name}")
-    return []
 
-# Function to Filter News Using Named Entity Recognition (NER)
-def filter_relevant_news(news_list, company_name):
-    filtered_news = []
+    if "articles" not in data:
+        logging.warning(f"No financial news found for {company_name}")
+        return []
+
+    news_list = [
+        {"title": article["title"], "description": article["description"]}
+        for article in data["articles"][:20]
+    ]
+
+    logging.info(f"Fetched {len(news_list)} news articles for {company_name}")
+    print(f"Fetched {len(news_list)} articles")  # Debugging
+
+    # Print fetched articles to see what data is returned
     for article in news_list:
-        text = f"{article['title']} {article.get('description', '')}"
-        doc = ner_model(text)
+        print(f"🔹 {article['title']} - {article['description']}")
 
-        # Check if the company name appears in the recognized entities
-        if any(ent.text.lower() == company_name.lower() for ent in doc.ents):
-            filtered_news.append(article)
+    # Define expanded risk-related keywords
+    risk_keywords = [
+        "fraud", "lawsuit", "investigation", "sanctions",
+        "indictment", "SEC", "DOJ", "probe", "money laundering",
+        "bribery", "corruption", "scandal", "settlement",
+        "penalty", "fine", "illegal", "regulatory action",
+        "insider trading", "embezzlement", "whistleblower",
+        "securities fraud", "criminal charges", "compliance violation"
+    ]
 
-    logging.info(f"Filtered news count: {len(filtered_news)}")
-    return filtered_news
-
-
-def analyze_news_sentiment(news_list):
-    sentiment_scores = {"positive": 0, "neutral": 0, "negative": 0}
-    analyzed_news = []
-
+    relevant_news = []
     for article in news_list:
-        title = article["title"]
-        description = article.get("description", "")
-        text = f"{title}. {description}" if description else title
+        text = f"{article['title']} {article['description']}" if article["description"] else article["title"]
 
-        sentiment = sentiment_analyzer(text[:512])[0]  # Truncate to fit model limit
-        sentiment_label = sentiment["label"].lower()
-        sentiment_scores[sentiment_label] += 1
-        analyzed_news.append(f"- {title} ({sentiment_label.capitalize()})")
+        # Loose matching: check if company name is in the text
+        company_mentioned = company_name.lower() in text.lower() or fuzz.partial_ratio(company_name.lower(), text.lower()) >= 60
 
-    # Determine overall sentiment
-    overall_sentiment = max(sentiment_scores, key=sentiment_scores.get)
-    return analyzed_news, overall_sentiment
+        # Check for risk-related keywords using simple lowercase matching
+        found_keywords = [word for word in risk_keywords if word in text.lower()]
+        contains_risk_keywords = bool(found_keywords)
+
+        # Perform sentiment analysis
+        sentiment = sentiment_analyzer(text[:512])[0]["label"].lower()
+
+        # Debugging: Print article details
+        print(f"\n🔍 Checking: {article['title']}")
+        print(f"   - Company Mentioned: {company_mentioned}")
+        print(f"   - Risk Keywords Found: {found_keywords}")
+        print(f"   - Sentiment: {sentiment}")
+
+        # Keep articles that mention the company and contain risk terms
+        if company_mentioned and contains_risk_keywords:
+            logging.info(f"✅ Keeping article: {text}")
+            relevant_news.append(article)
+        else:
+            logging.info(f"❌ Ignoring: {text} (Company Mention: {company_mentioned}, Risk Keywords: {contains_risk_keywords})")
+
+    logging.info(f"Filtered {len(relevant_news)} risk-related news articles for {company_name}")
+    print(f"✅ Found {len(relevant_news)} relevant articles.")  # Debugging
+    return relevant_news
+
+
 
 def check_sanctions(name, bert_threshold=0.75, fuzzy_threshold=85):
     df, sanctioned_embeddings = get_sanctioned_embeddings()
@@ -212,7 +225,7 @@ def compile_risk_data(company_name):
     if not cik:
         return "CIK not found."
     report = f"Entity: {company_name}\nCIK: {cik}\n"
-    report+= get_sec_filings(cik)
+    report += "\n".join([str(filing) for filing in get_sec_filings(cik)]) + "\n\n"
     summary = summarizer(report[:1024], max_length=150, min_length=50, do_sample=False)
     report += f"Risk Summary: {summary[0]['summary_text']}"
     return report
@@ -223,21 +236,18 @@ def check_company(name):
     
     report = f"Sanctions Check:\n{sanctions_result}\n\nFinancial Risk:\n{risk_result}\n\n"
     
-    news_list = get_financial_news(company_name)
-    if news_list:
-        analyzed_news, overall_sentiment = analyze_news_sentiment(news_list)
-        report += "\n📰 Financial News Sentiment: " + overall_sentiment.capitalize() + "\n"
-        report += "\n".join(analyzed_news) + "\n\n"
-    else:
-        report += "\n📰 Financial News Sentiment: No relevant news available.\n"
+    report +=str(get_financial_news(name))
     
-    summary_text = summarizer(report[:1024], max_length=150, min_length=50, do_sample=False)
+    
+    summary_text = summarizer(report[:1024], max_length=512, min_length=50, do_sample=False)
     report += f"Short Summary:\n{summary_text[0]['summary_text']}"
     
     return report
 
 
 # Example Usage
-test_companies = ["Tesla", "Wells Fargo", "Hezbollah"]
+test_companies = ["Huawei"]
 for company in test_companies:
     print(check_company(company))
+
+
