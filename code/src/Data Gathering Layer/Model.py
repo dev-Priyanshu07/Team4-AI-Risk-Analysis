@@ -260,7 +260,19 @@ def check_company(name):
 
     report = f"Sanctions Check:\n{sanctions_result}\n\nFinancial Risk:\n{risk_result}\n\n"
 
-    report +=str(get_financial_news(name))
+    news_list = get_financial_news(name)
+
+    if news_list:
+        report += "\n📢 **Financial News:**\n"
+        for i, article in enumerate(news_list, 1):
+            title = article["title"]
+            description = article["description"] if article["description"] else "No description available."
+            url = article.get("url", "No link available")
+            
+            report += f"\n🔹 **{i}. {title}**\n   {description}\n   🔗 [Read More]({url})\n"
+    else:
+        report += "\n📢 No relevant financial news found.\n"
+
 
 
     summary_text = summarizer(report[:1024], max_length=512, min_length=50, do_sample=False)
