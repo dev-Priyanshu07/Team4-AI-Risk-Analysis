@@ -352,7 +352,7 @@ def check_low_market_cap(market_cap):
     :param market_cap: Market capitalization in USD
     :return: True if the company has a very low market cap, False otherwise
     """
-    return market_cap is not None and market_cap < 50_000_000  # Under $50M is considered high-risk
+    return market_cap is not None and int(market_cap) < 50_000_000  # Under $50M is considered high-risk
 
 import re
 
@@ -442,7 +442,7 @@ def generate_risk_report(company_name):
     if check_sanctioned_country(entity_country):
         report += "\n ⚠️ Country is under international sanctions! High-risk entity."
     if check_suspicious_domain(company_info.get("Website", "")):
-        report += "\n ⚠️ Suspicious top-level domain (TLD):" {company_info.get('Website', '')}
+        report += "\n ⚠️ Suspicious top-level domain (TLD):" + str({company_info.get('Website', '')})
     if check_low_market_cap(company_info.get('Market Cap', '')):
         report += "\n ⚠️ Market Cap is very low! High-risk entity."
     if check_generic_name(company_name):
