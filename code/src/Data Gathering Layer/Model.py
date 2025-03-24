@@ -293,12 +293,56 @@ def get_company_info(company_name):
     }
 
 
+
+def check_tax_haven(entity_country):
+    TAX_HAVENS = {
+    "BS", "BB", "BM", "KY", "VG", "AI", "AG", "VC", "DM", "MS", "TC",
+    "MU", "SC", "LC", "IM", "JE", "GG", "SG", "HK", "MO", "PA", "UY"
+}
+    return entity_country in TAX_HAVENS
+
+def check_ofc(entity_country):
+    OFC_COUNTRIES = {
+        "BS", "BB", "BM", "KY", "VG", "AI", "AG", "VC", "DM", "MS", "TC",
+        "MU", "SC", "LC", "IM", "JE", "GG", "SG", "HK", "MO", "PA", "UY",
+        "MT", "CY", "LI", "AD", "MC"
+    }
+    return entity_country in OFC_COUNTRIES
+
+SHELL_REGISTRATION_HOTSPOTS = {"VG", "KY", "BM", "SC", "IM", "JE", "GG"}
+HIGH_RISK_INDUSTRIES = {
+    "Cryptocurrency", "Blockchain", "Forex Trading", "Casinos",
+    "Offshore Banking", "Precious Metals Trading", "Private Banking"
+}
+def check_sanctioned_country(entity_country):
+    """
+    Checks if the entity's country is in the list of sanctioned countries.
+
+    :param entity_country: Country code of the entity (ISO Alpha-2 format, e.g., 'RU' for Russia)
+    :return: True if the country is sanctioned, False otherwise
+    """
+    SANCTIONED_COUNTRIES = {
+        "AF",  # Afghanistan
+        "BY",  # Belarus
+        "CU",  # Cuba
+        "IR",  # Iran
+        "KP",  # North Korea
+        "RU",  # Russia
+        "SD",  # Sudan
+        "SY",  # Syria
+        "VE",  # Venezuela
+    }
+    return entity_country in SANCTIONED_COUNTRIES
+
+
+
 def generate_risk_report(company_name):
     cik = get_cik_number(company_name)
     sec_filings = get_sec_filings(cik) if cik else "CIK not found."
     sanctions_result = check_sanctions(company_name)
     company_info = get_company_info(company_name)
     financial_news = get_financial_news(company_name)
+    entity_country = company_info.get('Country', 'N/A')
     
     # Format SEC Filings
     formatted_sec_filings = "\n".join([
@@ -343,11 +387,25 @@ def generate_risk_report(company_name):
 
     ---
 
-    ## 5️⃣ 📊 **Final Summary (For LLAMA Analysis)**
+    ## 5️⃣ 📊 **Final Summary**
     """
     
     # Summarization for LLAMA model prompt
     summary_text = summarizer(report[:1024], max_length=512, min_length=50, do_sample=False)
     report += f"{summary_text[0]['summary_text']}"
+    if check_tax_haven(entity_country):
+        report+="\n ⚠️ Entity is located in a tax haven!"
+    if check_ofc(entity_country):
+        report+="\n ⚠️ Entity is located in a Offshore Financial Center (OFC)!"
+    if entity_country in SHELL_REGISTRATION_HOTSPOTS:
+        report += "\n ⚠️ This company is registered in a known shell company hotspot!"
+    if company_info.get("Industry", "N/A") in HIGH_RISK_INDUSTRIES:
+        report += "\n ⚠️ Company operates in a high-risk industry!"
+    if "government" in company_info.get("Industry", "").lower():
+        report += "\n ⚠️ Company is involved in government contracts—heightened corruption risk!"
+    if check_sanctioned_country(entity_country):
+        report += "\n ⚠️ Country is under international sanctions! High-risk entity."
+
+
     
     return report
