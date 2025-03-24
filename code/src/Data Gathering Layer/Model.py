@@ -136,7 +136,6 @@ import logging
 from fuzzywuzzy import fuzz
 
 def get_financial_news(company_name):
-    API_KEY = "9047082950c04406ad8378594370e334"  # Replace with your API key
     search_query = f'"{company_name}"'
     url = f"https://newsapi.org/v2/everything?q={search_query}&language=en&sortBy=publishedAt&apiKey={API_KEY}"
 
