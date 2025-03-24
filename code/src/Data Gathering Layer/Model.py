@@ -334,6 +334,42 @@ def check_sanctioned_country(entity_country):
     }
     return entity_country in SANCTIONED_COUNTRIES
 
+def check_suspicious_domain(website_url):
+    """
+    Checks if the company's website uses a suspicious top-level domain (TLD).
+    
+    :param website_url: Website URL of the company
+    :return: True if the domain is suspicious, False otherwise
+    """
+    SUSPICIOUS_TLDS = {".xyz", ".biz", ".top", ".tk", ".cc", ".ws", ".pw"}
+    domain_extension = website_url.split(".")[-1].lower() if website_url else ""
+    return f".{domain_extension}" in SUSPICIOUS_TLDS
+
+def check_low_market_cap(market_cap):
+    """
+    Checks if the company's market cap is very low (potential penny stock or high risk).
+    
+    :param market_cap: Market capitalization in USD
+    :return: True if the company has a very low market cap, False otherwise
+    """
+    return market_cap is not None and market_cap < 50_000_000  # Under $50M is considered high-risk
+
+import re
+
+def check_generic_name(company_name):
+    """
+    Checks if the company name is overly generic or contains suspicious patterns.
+    
+    :param company_name: The name of the company
+    :return: True if the name looks suspicious, False otherwise
+    """
+    GENERIC_PATTERNS = [
+        r"global\s+trading", r"international\s+business", r"enterprise\s+group",
+        r"holding\s+company", r"\b[a-zA-Z]*\d{3,}\b"  # Random numbers in name
+    ]
+    return any(re.search(pattern, company_name, re.IGNORECASE) for pattern in GENERIC_PATTERNS)
+
+
 
 
 def generate_risk_report(company_name):
@@ -405,6 +441,12 @@ def generate_risk_report(company_name):
         report += "\n ⚠️ Company is involved in government contracts—heightened corruption risk!"
     if check_sanctioned_country(entity_country):
         report += "\n ⚠️ Country is under international sanctions! High-risk entity."
+    if check_suspicious_domain(company_info.get("Website", "")):
+        report += "\n ⚠️ Suspicious top-level domain (TLD):" {company_info.get('Website', '')}
+    if check_low_market_cap(company_info.get('Market Cap', '')):
+        report += "\n ⚠️ Market Cap is very low! High-risk entity."
+    if check_generic_name(company_name):
+        report += "\n ⚠️ Company name is overly generic or contains suspicious patterns."
 
 
     
