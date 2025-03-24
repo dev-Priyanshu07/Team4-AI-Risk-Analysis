@@ -11,6 +11,9 @@ import logging
 import spacy
 from transformers import pipeline, AutoModelForSequenceClassification, AutoTokenizer
 from datetime import datetime
+import requests
+
+
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -53,6 +56,7 @@ def clean_name(name):
 
 def load_ofac_data():
     try:
+        download_ofac_list()
         df = pd.read_csv(OFAC_FILE, encoding="ISO-8859-1", header=None)
 
         # Extract columns 1 and 11
@@ -127,15 +131,9 @@ def check_sanctions(name, bert_threshold=0.75, fuzzy_threshold=85):
 
 # Function to Perform Sentiment Analysis on Financial News
 
-import requests
-import logging
-from fuzzywuzzy import fuzz
-
-import requests
-import logging
-from fuzzywuzzy import fuzz
 
 def get_financial_news(company_name):
+    API_KEY = "9047082950c04406ad8378594370e334"  # Replace with your API key
     search_query = f'"{company_name}"'
     url = f"https://newsapi.org/v2/everything?q={search_query}&language=en&sortBy=publishedAt&apiKey={API_KEY}"
 
@@ -242,44 +240,114 @@ def get_financial_data(cik, concept):
         return data.get("units", {}).get("USD", [])
     return None
 
+FIN_HUB_API_KEY = FIN_HUB_API
+ALPHA_VANTAGE_API_KEY = ALPHA_VANTAGE_API
 
-def compile_risk_data(company_name):
+def get_company_ticker_alpha_vantage(company_name):
+    """
+    Fetch the stock ticker symbol using Alpha Vantage API with filtering.
+    """
+    search_url = f"https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords={company_name}&apikey={ALPHA_VANTAGE_API_KEY}"
+    
+    response = requests.get(search_url)
+    data = response.json()
+
+    if "bestMatches" in data:
+        for match in data["bestMatches"]:
+            matched_name = match.get("2. name", "").lower()
+            symbol = match.get("1. symbol", "")
+
+            # If the matched name is a close match, return the symbol
+            if company_name.lower() in matched_name:
+                return symbol
+    
+    return None
+
+def get_company_info(company_name):
+    """
+    Fetch company details using FinHub API.
+    - Uses Alpha Vantage to get the ticker first.
+    """
+    ticker = get_company_ticker_alpha_vantage(company_name)
+
+    if not ticker:
+        return {"error": f"No ticker found for {company_name}"}
+
+    # Get company profile using FinHub API
+    profile_url = f"https://finnhub.io/api/v1/stock/profile2?symbol={ticker}&token={FIN_HUB_API_KEY}"
+    
+    response = requests.get(profile_url)
+    company_info = response.json()
+
+    if "name" not in company_info:
+        return {"error": f"Company details not found for {company_name} ({ticker})"}
+
+    return {
+        "Company Name": company_info.get("name"),
+        "Ticker": ticker,
+        "Country": company_info.get("country", "N/A"),
+        "Industry": company_info.get("finnhubIndustry", "N/A"),
+        "Market Cap": company_info.get("marketCapitalization", "N/A"),
+        "Exchange": company_info.get("exchange", "N/A"),
+        "Website": company_info.get("weburl", "N/A"),
+    }
+
+
+def generate_risk_report(company_name):
     cik = get_cik_number(company_name)
-    if not cik:
-        return "CIK not found."
-    report = f"Entity: {company_name}\nCIK: {cik}\n"
-    report += "\n".join([str(filing) for filing in get_sec_filings(cik)]) + "\n\n"
-    summary = summarizer(report[:1024], max_length=150, min_length=50, do_sample=False)
-    report += f"Risk Summary: {summary[0]['summary_text']}"
-    return report
+    sec_filings = get_sec_filings(cik) if cik else "CIK not found."
+    sanctions_result = check_sanctions(company_name)
+    company_info = get_company_info(company_name)
+    financial_news = get_financial_news(company_name)
+    
+    # Format SEC Filings
+    formatted_sec_filings = "\n".join([
+        f"- {filing['title']} (🔗 {filing['link']})" for filing in sec_filings
+    ]) if isinstance(sec_filings, list) else sec_filings
+    
+    # Extract key financial risk factors
+    identified_risk_factors = "\n".join([
+        f"- {article['title']} (🔗 {article['url']})" for article in financial_news
+    ]) if financial_news else "No high-risk news detected."
+    
+    # Compile Report
+    report = f"""
+    # 🏢 ENTITY RISK REPORT
 
-def check_company(name):
-    sanctions_result = check_sanctions(name)
-    risk_result = compile_risk_data(name)
+    ## 1️⃣ Entity Details
+    - **Company Name:** {company_info.get('Company Name', 'N/A')}
+    - **CIK Number:** {cik if cik else "Not found"}
+    - **Ticker Symbol:** {company_info.get('Ticker', 'Not found')}
+    - **Country:** {company_info.get('Country', 'N/A')}
+    - **Industry:** {company_info.get('Industry', 'N/A')}
+    - **Market Cap:** {company_info.get('Market Cap', 'N/A')}
+    - **Exchange:** {company_info.get('Exchange', 'N/A')}
+    - **Website:** {company_info.get('Website', 'N/A')}
 
-    report = f"Sanctions Check:\n{sanctions_result}\n\nFinancial Risk:\n{risk_result}\n\n"
+    ---
 
-    news_list = get_financial_news(name)
+    ## 2️⃣ 🚨 **Sanctions Check**
+    **Sanctioned?** {sanctions_result}
 
-    if news_list:
-        report += "\n📢 **Financial News:**\n"
-        for i, article in enumerate(news_list, 1):
-            title = article["title"]
-            description = article["description"] if article["description"] else "No description available."
-            url = article.get("url", "No link available")
-            
-            report += f"\n🔹 **{i}. {title}**\n   {description}\n   🔗 [Read More]({url})\n"
-    else:
-        report += "\n📢 No relevant financial news found.\n"
+    ---
 
+    ## 3️⃣ 📑 **SEC Filings & Risk Analysis**
+    ### 🔹 Recent Filings:
+    {formatted_sec_filings}
 
+    ---
 
+    ## 4️⃣ 📰 **Financial News & Risk Factors**
+    ### 🔹 Key News Articles:
+    {identified_risk_factors}
+
+    ---
+
+    ## 5️⃣ 📊 **Final Summary (For LLAMA Analysis)**
+    """
+    
+    # Summarization for LLAMA model prompt
     summary_text = summarizer(report[:1024], max_length=512, min_length=50, do_sample=False)
-    report += f"Short Summary:\n{summary_text[0]['summary_text']}"
-
+    report += f"{summary_text[0]['summary_text']}"
+    
     return report
-
-
-
-
-
