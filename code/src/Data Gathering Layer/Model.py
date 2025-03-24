@@ -352,7 +352,7 @@ def check_low_market_cap(market_cap):
     :param market_cap: Market capitalization in USD
     :return: True if the company has a very low market cap, False otherwise
     """
-    return market_cap is not None and int(market_cap) < 50_000_000  # Under $50M is considered high-risk
+    return market_cap != '' and int(market_cap) < 50_000_000  # Under $50M is considered high-risk
 
 import re
 
