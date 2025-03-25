@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transaction Risk Analysis</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 50px;
+        }
+
+        input,
+        button {
+            padding: 10px;
+            margin: 5px;
+        }
+
+        .transaction-container {
+            max-width: 800px;
+            margin: auto;
+            text-align: left;
+        }
+
+        .transaction-card {
+            border: 1px solid black;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Transaction Risk Analysis</h1>
+
+    <h2>Upload File</h2>
+    <input type="file" id="fileInput">
+    <select id="dataType">
+        <option value="structured">Structured</option>
+        <option value="unstructured">Unstructured</option>
+    </select>
+    <button onclick="uploadFile()">Upload & Analyze</button>
+
+    <h2>Search for an Entity</h2>
+    <input type="text" id="searchInput" placeholder="Enter entity name">
+    <button onclick="searchEntity()">Search</button>
+
+    <h2>Search Results</h2>
+    <div id="results" class="transaction-container"></div>
+
+    <script>
+        function uploadFile() {
+            let fileInput = document.getElementById("fileInput").files[0];
+            let dataType = document.getElementById("dataType").value;
+
+            if (!fileInput) {
+                alert("Please select a file to upload.");
+                return;
+            }
+
+            let formData = new FormData();
+            formData.append("file", fileInput);
+
+            fetch(`http://127.0.0.1:8000/upload/${dataType}/`, {
+                method: "POST",
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => alert(JSON.stringify(data.results, null, 2)))
+                .catch(error => alert("Upload failed."));
+        }
+
+        function searchEntity() {
+            let entity = document.getElementById("searchInput").value.trim();
+            if (!entity) {
+                alert("Enter an entity name.");
+                return;
+            }
+
+            fetch(`http://127.0.0.1:8000/search/?entity=${entity}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.results) {
+                        displayResults(data.results);
+                    } else {
+                        alert("No records found.");
+                    }
+                })
+                .catch(error => {
+                    console.error("Search failed:", error);
+                    alert("Search failed.");
+                });
+        }
+
+        function displayResults(results) {
+            let resultsDiv = document.getElementById("results");
+            resultsDiv.innerHTML = ""; // Clear previous results
+
+            results.forEach(result => {
+                let transactionDiv = document.createElement("div");
+                transactionDiv.className = "transaction-card";
+
+                transactionDiv.innerHTML = `
+            <p><strong>Transaction ID:</strong> ${result["Transaction ID"] || "N/A"}</p>
+            <p><strong>Sender:</strong> ${result["Sender"] || "Unknown"}</p>
+            <p><strong>Receiver:</strong> ${result["Receiver"] || "Unknown"}</p>
+            <p><strong>Entity Type:</strong> ${Array.isArray(result["Entity Type"]) ? result["Entity Type"].join(", ") : "N/A"}</p>
+            <p><strong>Risk Score:</strong> ${result["Risk Score"] !== undefined ? result["Risk Score"] : "N/A"}</p>
+            <p><strong>Supporting Evidence:</strong> ${Array.isArray(result["Supporting Evidence"]) ? result["Supporting Evidence"].join(", ") : "N/A"}</p>
+            <p><strong>Confidence Score:</strong> ${result["Confidence Score"] !== undefined ? result["Confidence Score"] : "N/A"}</p>
+            <p><strong>Reason:</strong> ${result["Reason"] || "No reason provided"}</p>
+            <p><strong>Full Transaction Text:</strong> ${result["Full Text"] || "Not available"}</p>
+        `;
+                resultsDiv.appendChild(transactionDiv);
+            });
+        }
+
+    </script>
+
+</body>
+
+</html>
